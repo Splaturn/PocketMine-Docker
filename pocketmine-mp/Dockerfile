@@ -1,21 +1,25 @@
 # Build stage for compilation. Build tools like g++ will not be copied into the final stage to reduce image size.
 FROM ubuntu:18.04
 ARG PMMP_TAG
+ARG PHP_BRANCH
 ARG COMPILE_SH_ARGS="-f -g"
 ARG PMMP_REPO=pmmp/PocketMine-MP
+ARG PHP_REPO=pmmp/php-build-scripts
 
 RUN test ! -z ${PMMP_TAG} || (echo "Missing build-arg PMMP_TAG" && false)
+RUN test ! -z ${PHP_BRANCH} || (echo "Missing build-arg PHP_BRANCH" && false)
 
 RUN apt-get update && apt-get install --no-install-recommends -y curl ca-certificates build-essential m4 gzip bzip2 bison git cmake autoconf automake pkg-config libtool libtool-bin re2c
 
+RUN mkdir /build-php
+WORKDIR /build-php
+RUN git clone https://github.com/${PHP_REPO}.git -b ${PHP_BRANCH} .
+RUN ./compile.sh -t linux64 -j ${THREADS:-$(grep -E ^processor /proc/cpuinfo | wc -l)} ${COMPILE_SH_ARGS}
+RUN ln -s /build-php/bin/php7/bin/php /usr/bin/php
+
 RUN mkdir /build
 WORKDIR /build
-RUN git clone https://github.com/${PMMP_REPO}.git -b ${PMMP_TAG} --recursive .
-WORKDIR /build/build/php
-RUN ./compile.sh -t linux64 -j ${THREADS:-$(grep -E ^processor /proc/cpuinfo | wc -l)} ${COMPILE_SH_ARGS}
-RUN ln -s /build/build/php/bin/php7/bin/php /usr/bin/php
-
-WORKDIR /build
+RUN git clone https://github.com/${PMMP_REPO}.git -b ${PMMP_TAG} .
 RUN curl -L https://getcomposer.org/installer | php
 RUN mv composer.phar /usr/bin/composer
 
@@ -36,7 +40,7 @@ RUN groupadd -g 1000 pocketmine
 RUN useradd -r -d /pocketmine -p "" -u 1000 -m -g pocketmine pocketmine
 
 WORKDIR /pocketmine
-COPY --from=0 /build/build/php/bin/php7 /usr/php
+COPY --from=0 /build-php/bin/php7 /usr/php
 RUN grep -q '^extension_dir' /usr/php/bin/php.ini && \
 	sed -ibak "s{^extension_dir=.*{extension_dir=\"$(find /usr/php -name *debug-zts*)\"{" /usr/php/bin/php.ini || echo "extension_dir=\"$(find /usr/php -name *debug-zts*)\"" >> /usr/php/bin/php.ini
 RUN ln -s /usr/php/bin/php /usr/bin/php
